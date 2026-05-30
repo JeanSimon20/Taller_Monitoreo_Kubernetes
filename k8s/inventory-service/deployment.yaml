@@ -1,0 +1,86 @@
+# =============================================================================
+# DEPLOYMENT — inventory-service
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: taller-monitoreo
+  labels:
+    app: inventory-service
+    version: "1.0"
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+        version: "1.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      containers:
+        - name: inventory-service
+          image: inventory-service:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 3000
+              name: http
+
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            # ================================================================
+            # CASUÍSTICA 4 — EL SERVICIO LENTO
+            # ================================================================
+            # Para activar el delay en la demo:
+            #   kubectl set env deployment/inventory-service CHAOS_DELAY_MS=2000 -n taller-monitoreo
+            #
+            # Para desactivarlo:
+            #   kubectl set env deployment/inventory-service CHAOS_DELAY_MS=0 -n taller-monitoreo
+            # ================================================================
+            - name: CHAOS_DELAY_MS
+              value: "0"   # 0 = comportamiento normal
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"

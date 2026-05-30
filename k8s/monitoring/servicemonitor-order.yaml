@@ -1,0 +1,49 @@
+# =============================================================================
+# SERVICEMONITOR — order-api
+# =============================================================================
+# PROFESOR DICE: El ServiceMonitor es un CRD (Custom Resource Definition)
+# que instala el Prometheus Operator. Es la forma "declarativa" de decirle
+# a Prometheus qué Services debe monitorear.
+#
+# Sin el Operator, tendrías que editar el prometheus.yml a mano.
+# Con el Operator, solo creas este archivo y K8s hace el resto.
+#
+# VERIFICAR QUE PROMETHEUS DETECTÓ EL TARGET:
+#   1. kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090 -n monitoring
+#   2. Abrir: http://localhost:9090/targets
+#   3. Buscar "order-api" — debe estar en estado UP
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-api-monitor
+  namespace: taller-monitoreo
+  labels:
+    # PROFESOR DICE: Este label DEBE coincidir con el selector del Prometheus Operator.
+    # Si no coincide, el Operator ignora este ServiceMonitor.
+    app: order-api
+    monitoring: "enabled"
+spec:
+  # A qué Services aplica este monitor
+  selector:
+    matchLabels:
+      app: order-api
+
+  # En qué namespaces buscar esos Services
+  namespaceSelector:
+    matchNames:
+      - taller-monitoreo
+
+  endpoints:
+    - port: http            # Nombre del puerto en el Service (debe coincidir)
+      path: /metrics        # Ruta donde están las métricas
+      interval: 15s         # Cada cuánto hace scrape Prometheus
+      scrapeTimeout: 10s    # Timeout para la petición de métricas
+
+      # PROFESOR DICE: Podemos añadir labels extra a TODAS las métricas de este target.
+      # Esto es útil para filtrar en PromQL: {service="order-api"}
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace

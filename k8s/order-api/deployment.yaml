@@ -1,0 +1,112 @@
+# =============================================================================
+# DEPLOYMENT — order-api
+# =============================================================================
+# PROFESOR DICE: El Deployment es el objeto más importante para aplicaciones
+# stateless en Kubernetes. Le dice a K8s:
+#   - Cuántas réplicas quiero
+#   - Qué imagen usar
+#   - Cómo saber si el pod está vivo y listo
+#   - Cuántos recursos puede consumir
+#
+# COMANDOS ÚTILES:
+#   kubectl explain deployment.spec.template.spec.containers
+#   kubectl describe deployment order-api -n taller-monitoreo
+#   kubectl rollout status deployment/order-api -n taller-monitoreo
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  namespace: taller-monitoreo
+  labels:
+    app: order-api
+    version: "1.0"
+    component: backend
+spec:
+  # PROFESOR DICE: Empezamos con 1 réplica.
+  # En la Casuística 3 (tormenta de requests), el HPA lo escalará automáticamente.
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: order-api
+
+  # Estrategia de actualización — sin downtime
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1           # Máximo 1 pod extra durante el update
+      maxUnavailable: 0     # Nunca bajar a 0 pods disponibles
+
+  template:
+    metadata:
+      labels:
+        app: order-api
+        version: "1.0"
+      annotations:
+        # PROFESOR DICE: Esta anotación le dice a Prometheus que raspe este pod.
+        # Es el método "legacy". Con el Prometheus Operator usamos ServiceMonitor.
+        # Pero es bueno conocer ambos métodos.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      containers:
+        - name: order-api
+          image: order-api:latest
+          # PROFESOR DICE: 'Never' es CRUCIAL para Minikube.
+          # Le dice a K8s que NO intente descargar la imagen de Docker Hub.
+          # Usará la imagen que construimos localmente en Minikube.
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+
+          env:
+            - name: PORT
+              value: "5000"
+            - name: INVENTORY_SERVICE_URL
+              # PROFESOR DICE: Kubernetes resuelve este nombre DNS automáticamente.
+              # 'inventory-service' es el nombre del Service de K8s.
+              # El formato completo es: <service>.<namespace>.svc.cluster.local
+              value: "http://inventory-service.taller-monitoreo.svc.cluster.local:3000"
+
+          # ── Liveness Probe ─────────────────────────────────────────────────
+          # PROFESOR DICE: Si este probe falla 3 veces, K8s MATA el pod y lo reinicia.
+          # Úsalo para detectar deadlocks o estados irrecuperables.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15   # Esperar 15s antes de empezar a checar
+            periodSeconds: 10          # Checa cada 10 segundos
+            failureThreshold: 3        # Falla 3 veces = reiniciar pod
+            timeoutSeconds: 5
+
+          # ── Readiness Probe ────────────────────────────────────────────────
+          # PROFESOR DICE: Si este probe falla, K8s DEJA DE ENVIAR tráfico al pod.
+          # El pod sigue vivo pero no recibe requests. Úsalo para warmup.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+
+          # ── Resource Limits ────────────────────────────────────────────────
+          # PROFESOR DICE: SIEMPRE define limits en producción.
+          # Sin limits, un pod con memory leak puede matar un nodo entero.
+          # En la Casuística 2, veremos cómo el limit de memoria protege el cluster.
+          resources:
+            requests:
+              cpu: "100m"      # 0.1 CPU = 100 milicores
+              memory: "128Mi"  # 128 MB mínimo garantizado
+            limits:
+              cpu: "500m"      # Máximo 0.5 CPU
+              memory: "256Mi"  # MÁXIMO 256 MB — el OOMKiller actúa si supera esto

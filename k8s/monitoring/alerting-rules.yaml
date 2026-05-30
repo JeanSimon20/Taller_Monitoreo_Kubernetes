@@ -1,0 +1,177 @@
+# =============================================================================
+# PROMETHEUSRULE — Alertas del Taller
+# =============================================================================
+# PROFESOR DICE: Las PrometheusRules definen las alertas en PromQL.
+# Cuando una expresión es TRUE durante el tiempo definido, se dispara la alerta.
+#
+# AlertManager recibe la alerta y decide cómo notificar:
+# email, Slack, PagerDuty, etc.
+#
+# VERIFICAR ALERTAS:
+#   kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090 -n monitoring
+#   Ir a: http://localhost:9090/alerts
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: taller-alertas
+  namespace: taller-monitoreo
+  labels:
+    app: taller-monitoreo
+    monitoring: "enabled"
+    # PROFESOR DICE: Este label debe coincidir con el ruleSelector del Prometheus Operator
+    role: alert-rules
+
+spec:
+  groups:
+    # ── Grupo 1: Alertas de los Microservicios ────────────────────────────────
+    - name: microservicios.rules
+      interval: 30s
+      rules:
+
+        # ── ALERTA: order-api caído ──────────────────────────────────────────
+        # CASUÍSTICA 1: El Servicio Muerto
+        - alert: OrderApiDown
+          # up == 0 significa que Prometheus no puede raspar el /metrics del servicio
+          expr: up{job="order-api"} == 0
+          for: 30s    # Debe ser 0 durante 30 segundos antes de disparar
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: "order-api no está disponible"
+            description: |
+              El servicio order-api no responde desde hace {{ $value | humanizeDuration }}.
+              Verificar con: kubectl get pods -n taller-monitoreo -l app=order-api
+            runbook_url: "https://github.com/taller/runbooks/order-api-down"
+
+        # ── ALERTA: inventory-service caído ─────────────────────────────────
+        - alert: InventoryServiceDown
+          expr: up{job="inventory-service"} == 0
+          for: 30s
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: "inventory-service no está disponible"
+            description: "El inventory-service no responde. Órdenes nuevas fallarán."
+
+        # ── ALERTA: Alta tasa de errores en order-api ────────────────────────
+        # Si más del 10% de las órdenes fallan en los últimos 5 minutos
+        - alert: HighOrderFailureRate
+          expr: |
+            (
+              rate(orders_total{status="failed"}[5m])
+              /
+              rate(orders_total[5m])
+            ) > 0.10
+          for: 2m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: "Alta tasa de órdenes fallidas (> 10%)"
+            description: "El {{ $value | humanizePercentage }} de las órdenes están fallando en los últimos 5 minutos."
+
+        # ── ALERTA: Latencia alta en order-api ──────────────────────────────
+        # El percentil 95 de latencia supera 2 segundos
+        - alert: HighApiLatency
+          expr: |
+            histogram_quantile(0.95,
+              rate(http_request_duration_seconds_bucket{endpoint="/orders"}[5m])
+            ) > 2.0
+          for: 3m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: "Latencia alta en order-api (p95 > 2s)"
+            description: "El percentil 95 de latencia es {{ $value | humanizeDuration }}. Investigar si inventory-service está lento."
+
+        # ── ALERTA: Timeouts con inventory-service ───────────────────────────
+        # CASUÍSTICA 4: El Servicio Lento
+        - alert: InventoryServiceTimeouts
+          expr: |
+            rate(inventory_service_calls_total{status="timeout"}[5m]) > 0.1
+          for: 1m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: "Timeouts con inventory-service"
+            description: "order-api está registrando timeouts al llamar a inventory-service. Posible degradación."
+
+    # ── Grupo 2: Alertas de Negocio ───────────────────────────────────────────
+    - name: negocio.rules
+      interval: 30s
+      rules:
+
+        # ── ALERTA: Stock crítico de un producto ─────────────────────────────
+        # CASUÍSTICA 5: El Stock Cero
+        - alert: LowInventoryStock
+          expr: inventory_stock_level < 5
+          for: 0s    # Alerta INMEDIATA — no esperamos, esto impacta negocio
+          labels:
+            severity: warning
+            team: operations
+          annotations:
+            summary: "Stock crítico: {{ $labels.product_id }}"
+            description: |
+              El producto {{ $labels.product_name }} ({{ $labels.product_id }})
+              tiene solo {{ $value }} unidades en stock.
+              ¡Reponer inventario inmediatamente!
+
+        # ── ALERTA: Producto sin stock ───────────────────────────────────────
+        - alert: ZeroInventoryStock
+          expr: inventory_stock_level == 0
+          for: 0s
+          labels:
+            severity: critical
+            team: operations
+          annotations:
+            summary: "STOCK AGOTADO: {{ $labels.product_id }}"
+            description: "El producto {{ $labels.product_name }} está COMPLETAMENTE AGOTADO. Ventas perdidas."
+
+    # ── Grupo 3: Alertas de Infraestructura ──────────────────────────────────
+    - name: infraestructura.rules
+      interval: 60s
+      rules:
+
+        # ── ALERTA: Pod en CrashLoopBackOff ─────────────────────────────────
+        # CASUÍSTICA 1: El Servicio Muerto
+        - alert: PodCrashLoopBackOff
+          expr: |
+            kube_pod_container_status_waiting_reason{
+              reason="CrashLoopBackOff",
+              namespace="taller-monitoreo"
+            } == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod en CrashLoopBackOff: {{ $labels.pod }}"
+            description: |
+              El pod {{ $labels.pod }} está en CrashLoopBackOff.
+              Ver logs con: kubectl logs {{ $labels.pod }} -n taller-monitoreo --previous
+
+        # ── ALERTA: Memoria alta ─────────────────────────────────────────────
+        # CASUÍSTICA 2: La Fuga de Memoria
+        - alert: HighMemoryUsage
+          expr: |
+            (
+              container_memory_working_set_bytes{
+                namespace="taller-monitoreo",
+                container!=""
+              }
+              /
+              kube_pod_container_resource_limits{
+                resource="memory",
+                namespace="taller-monitoreo"
+              }
+            ) > 0.85
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Uso de memoria alto (>85%): {{ $labels.container }}"
+            description: "El contenedor {{ $labels.container }} está usando {{ $value | humanizePercentage }} de su límite de memoria."

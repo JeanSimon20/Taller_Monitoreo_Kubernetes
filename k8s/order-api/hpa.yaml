@@ -1,0 +1,69 @@
+# =============================================================================
+# HPA — Horizontal Pod Autoscaler para order-api
+# =============================================================================
+# PROFESOR DICE: El HPA es una de las características MÁS PODEROSAS de K8s.
+# Monitora métricas del cluster y escala pods automáticamente.
+#
+# CASUÍSTICA 3 — LA TORMENTA DE REQUESTS:
+#   1. Ejecutamos el script de stress: ./load-testing/stress-test.sh
+#   2. La CPU de order-api supera el 70%
+#   3. El HPA detecta esto y crea más pods AUTOMÁTICAMENTE
+#   4. Vemos en Grafana cómo la latencia baja cuando llegan los pods nuevos
+#   5. Cuando el stress para, el HPA reduce los pods de vuelta a 1
+#
+# PREREQUISITO: Metrics Server debe estar instalado en Minikube.
+#   minikube addons enable metrics-server
+#
+# VERIFICAR EL HPA:
+#   kubectl get hpa -n taller-monitoreo --watch
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-api-hpa
+  namespace: taller-monitoreo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: order-api
+
+  minReplicas: 1   # Mínimo: no bajamos de 1 pod
+  maxReplicas: 5   # Máximo: no necesitamos más de 5 para la demo
+
+  metrics:
+    # ── Escalado por CPU ─────────────────────────────────────────────────────
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # PROFESOR DICE: 70% de CPU es el umbral de escalado.
+          # Cuando la CPU promedio de todos los pods supera esto, K8s crea más.
+          averageUtilization: 70
+
+    # ── Escalado por Memoria ─────────────────────────────────────────────────
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # Política de comportamiento del HPA
+  behavior:
+    scaleUp:
+      # No esperar para escalar UP — ante carga, actúa rápido
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2            # Agrega máximo 2 pods a la vez
+          periodSeconds: 60
+
+    scaleDown:
+      # Espera 5 minutos antes de reducir — evitamos "flapping" (up-down-up-down)
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1            # Reduce de 1 en 1 pod
+          periodSeconds: 60

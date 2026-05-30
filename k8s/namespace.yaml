@@ -1,0 +1,19 @@
+# =============================================================================
+# NAMESPACE — taller-monitoreo
+# =============================================================================
+# PROFESOR DICE: Los namespaces son como "carpetas virtuales" dentro de K8s.
+# Nos permiten aislar recursos, aplicar políticas, y limitar recursos por equipo.
+#
+# kubectl explain namespace
+# kubectl get namespaces
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taller-monitoreo
+  labels:
+    # PROFESOR DICE: Este label es CRÍTICO.
+    # Le dice a Prometheus (via kube-prometheus-stack) que monitoree este namespace.
+    # Sin este label, los ServiceMonitors no funcionarán.
+    monitoring: "enabled"
+    app.kubernetes.io/managed-by: "taller"

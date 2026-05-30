@@ -1,0 +1,38 @@
+# =============================================================================
+# SERVICE — order-api
+# =============================================================================
+# PROFESOR DICE: El Service es la puerta de entrada al pod.
+# Los pods tienen IPs que cambian cuando se recrean.
+# El Service tiene una IP ESTABLE (ClusterIP) y balancea entre pods.
+#
+# Tipos de Service:
+#   ClusterIP   → Solo accesible dentro del cluster (pod-to-pod)
+#   NodePort    → Accesible desde fuera del cluster via puerto del nodo
+#   LoadBalancer→ Crea un balanceador externo (nube)
+#
+# COMANDO PARA ACCEDER DESDE FUERA DEL CLUSTER (Minikube):
+#   minikube service order-api -n taller-monitoreo
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-api
+  namespace: taller-monitoreo
+  labels:
+    app: order-api
+    # PROFESOR DICE: Este label es usado por el ServiceMonitor de Prometheus
+    # para saber a qué Services hacer scrape.
+    monitoring: "enabled"
+spec:
+  # NodePort nos permite acceder desde fuera con: minikube service order-api
+  type: NodePort
+  selector:
+    # PROFESOR DICE: El selector DEBE coincidir exactamente con los labels del pod.
+    # Si no coincide, el Service no encontrará ningún pod y las requests fallarán.
+    app: order-api
+  ports:
+    - name: http          # El nombre del puerto es importante para el ServiceMonitor
+      port: 5000          # Puerto del Service (lo que otros pods usan)
+      targetPort: 5000    # Puerto del contenedor
+      protocol: TCP
+      nodePort: 30500     # Puerto fijo en el nodo (para acceso externo en Minikube)

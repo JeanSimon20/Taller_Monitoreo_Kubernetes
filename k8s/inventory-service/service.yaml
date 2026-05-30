@@ -1,0 +1,21 @@
+# =============================================================================
+# SERVICE — inventory-service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  namespace: taller-monitoreo
+  labels:
+    app: inventory-service
+    monitoring: "enabled"
+spec:
+  type: NodePort
+  selector:
+    app: inventory-service
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+      nodePort: 30300

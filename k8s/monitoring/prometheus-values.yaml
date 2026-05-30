@@ -1,0 +1,158 @@
+# =============================================================================
+# VALORES DE HELM — kube-prometheus-stack
+# =============================================================================
+# PROFESOR DICE: kube-prometheus-stack es el paquete TODO-EN-UNO que instala:
+#   - Prometheus Operator (gestiona Prometheus via CRDs de K8s)
+#   - Prometheus (el colector de métricas)
+#   - Grafana (el sistema de dashboards)
+#   - AlertManager (el gestor de alertas)
+#   - Node Exporter (métricas del nodo/VM)
+#   - kube-state-metrics (métricas de objetos K8s)
+#
+# INSTALACIÓN:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     --create-namespace \
+#     --values k8s/monitoring/prometheus-values.yaml \
+#     --wait
+# =============================================================================
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    # Intervalo de scrape: cada 15 segundos raspa todas las métricas
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+
+    # PROFESOR DICE: Esta es la parte MÁS IMPORTANTE de la configuración.
+    # Por defecto, el Prometheus Operator solo monitorea su propio namespace.
+    # Con 'matchLabels: {}' le decimos que monitoree TODOS los namespaces.
+    serviceMonitorNamespaceSelector:
+      matchLabels: {}
+
+    serviceMonitorSelector:
+      matchLabels: {}
+
+    podMonitorNamespaceSelector:
+      matchLabels: {}
+
+    # Retención de datos: guardamos 15 días de métricas
+    retention: 15d
+
+    # Recursos para Prometheus
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    # Almacenamiento en disco para las métricas
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+    # Reglas de alerta adicionales
+    additionalScrapeConfigs: []
+
+
+# ── Grafana ────────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+
+  # Credenciales de acceso (en producción, usar Secrets de K8s)
+  adminUser: admin
+  adminPassword: taller2024
+
+  # PROFESOR DICE: Hacemos Grafana accesible con NodePort para Minikube.
+  service:
+    type: NodePort
+    nodePort: 30300
+
+  # Grafana arranca con el datasource de Prometheus ya configurado
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://monitoring-kube-prometheus-prometheus:9090
+          isDefault: true
+          access: proxy
+
+  # Dashboards pre-cargados al iniciar
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: "taller"
+          orgId: 1
+          folder: "Taller Kubernetes"
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/taller
+
+  # PROFESOR DICE: Cargamos dashboards de la comunidad para no empezar de cero.
+  # El dashboard 15661 es el más popular para monitorear clusters K8s.
+  dashboards:
+    default:
+      kubernetes-cluster:
+        gnetId: 15661
+        revision: 1
+        datasource: Prometheus
+      node-exporter:
+        gnetId: 1860
+        revision: 37
+        datasource: Prometheus
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+
+# ── AlertManager ───────────────────────────────────────────────────────────────
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+
+# ── Node Exporter ──────────────────────────────────────────────────────────────
+# Métricas del sistema operativo del nodo
+nodeExporter:
+  enabled: true
+
+
+# ── Kube State Metrics ─────────────────────────────────────────────────────────
+# PROFESOR DICE: kube-state-metrics expone métricas sobre los OBJETOS de K8s.
+# Por ejemplo: cuántos pods están en estado Running vs Pending.
+kubeStateMetrics:
+  enabled: true
+
+
+# Componentes del plano de control de K8s
+kubeControllerManager:
+  enabled: false   # No disponible en Minikube por defecto
+
+kubeScheduler:
+  enabled: false   # No disponible en Minikube por defecto
+
+kubeEtcd:
+  enabled: false   # No disponible en Minikube por defecto
