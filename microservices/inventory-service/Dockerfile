@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Copiamos solo package.json primero para aprovechar el cache de Docker
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────

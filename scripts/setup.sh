@@ -95,12 +95,17 @@ build_images() {
     log_info "Configurando Docker para apuntar a Minikube..."
     eval "$(minikube docker-env)"
 
+    # Limpiamos imágenes viejas para evitar conflictos de caché
+    log_info "Eliminando imágenes anteriores si existen..."
+    docker rmi order-api:latest 2>/dev/null || true
+    docker rmi inventory-service:latest 2>/dev/null || true
+
     log_info "Construyendo order-api (Python/Flask)..."
-    docker build -t order-api:latest ./microservices/order-api/
+    docker build --no-cache --progress=plain -t order-api:latest ./microservices/order-api/
     log_success "order-api:latest construida"
 
     log_info "Construyendo inventory-service (Node.js)..."
-    docker build -t inventory-service:latest ./microservices/inventory-service/
+    docker build --no-cache --progress=plain -t inventory-service:latest ./microservices/inventory-service/
     log_success "inventory-service:latest construida"
 
     log_info "Imágenes disponibles en Minikube:"
