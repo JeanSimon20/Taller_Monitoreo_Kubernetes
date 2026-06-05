@@ -78,6 +78,7 @@ grafana:
     nodePort: 30300
 
   # Grafana arranca con el datasource de Prometheus ya configurado
+  # NOTA: isDefault: false porque kube-prometheus-stack ya configura uno por defecto
   datasources:
     datasources.yaml:
       apiVersion: 1
@@ -85,10 +86,12 @@ grafana:
         - name: Prometheus
           type: prometheus
           url: http://monitoring-kube-prometheus-prometheus:9090
-          isDefault: true
+          isDefault: false   # ← CORREGIDO: solo un default permitido por org
           access: proxy
 
-  # Dashboards pre-cargados al iniciar
+  # Proveedor de dashboards locales (nuestro JSON del taller)
+  # NOTA: Los dashboards de la comunidad (gnetId) se quitan para evitar
+  # timeouts al descargar de grafana.com durante el init del pod.
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
@@ -101,19 +104,6 @@ grafana:
           editable: true
           options:
             path: /var/lib/grafana/dashboards/taller
-
-  # PROFESOR DICE: Cargamos dashboards de la comunidad para no empezar de cero.
-  # El dashboard 15661 es el más popular para monitorear clusters K8s.
-  dashboards:
-    default:
-      kubernetes-cluster:
-        gnetId: 15661
-        revision: 1
-        datasource: Prometheus
-      node-exporter:
-        gnetId: 1860
-        revision: 37
-        datasource: Prometheus
 
   resources:
     requests:

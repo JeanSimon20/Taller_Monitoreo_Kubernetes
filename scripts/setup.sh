@@ -263,9 +263,9 @@ show_access_info() {
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  🧪 Para verificar las métricas:"
-    echo -e "  ${YELLOW}curl http://${MINIKUBE_IP}:30500/metrics${NC}"
-    echo -e "  ${YELLOW}curl http://${MINIKUBE_IP}:30300/metrics${NC}"
+    echo -e "  🧪 Para verificar las métricas (dentro de WSL):"
+    echo -e "  ${YELLOW}curl http://$(minikube ip):30500/health${NC}  # order-api"
+    echo -e "  ${YELLOW}curl http://$(minikube ip):30301/health${NC}  # inventory-service"
     echo ""
     echo -e "  💥 Para ejecutar las casuísticas:"
     echo -e "  ${YELLOW}bash load-testing/stress-test.sh${NC}       # Casuísticas 2 y 3"
@@ -296,6 +296,20 @@ main() {
     import_grafana_dashboard
     verify_setup
     show_access_info
+
+    echo ""
+    echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  ✅ Setup completado. Iniciando acceso al taller...${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  Ejecuta el siguiente comando para abrir todos los servicios:"
+    echo -e "  ${CYAN}bash scripts/port-forward.sh${NC}"
+    echo ""
+    echo -e "  O ábrelos automáticamente ahora con:"
+    read -p "  ¿Iniciar port-forwards ahora? [Y/n]: " -r START_PF
+    if [[ "${START_PF:-Y}" =~ ^[Yy]$ ]]; then
+        bash scripts/port-forward.sh
+    fi
 }
 
 main "$@"

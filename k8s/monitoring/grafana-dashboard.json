@@ -134,7 +134,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{endpoint='/orders'}[5m]))",
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{exported_endpoint='/orders'}[5m]))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -245,19 +245,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{exported_endpoint='/orders'}[5m]))",
           "legendFormat": "p50 (mediana)",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{exported_endpoint='/orders'}[5m]))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{exported_endpoint='/orders'}[5m]))",
           "legendFormat": "p99",
           "refId": "C"
         }

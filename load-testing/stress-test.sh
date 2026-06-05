@@ -52,14 +52,30 @@ run_memory_leak() {
 
     read -p "Presiona ENTER para iniciar... " -r
 
+    # NOTA: Cada llamada acumula 1KB. Para ver el efecto en Grafana:
+    #   80 iter  → 80KB  (invisible, < 0.1% del límite de 256MB)
+    #   5000 iter → 5MB  (visible en el gauge memory_leak_simulation_bytes)
+    #   100000 iter → ~100MB (dispara la alerta HighMemoryUsage al 85% de 256MB)
+    if (( iterations < 1000 )); then
+        echo -e "${YELLOW}⚠️  AVISO: ${iterations} iteraciones = solo $((iterations))KB acumulados.${NC}"
+        echo -e "${YELLOW}   Recomendado: al menos 5000 para que Grafana lo muestre visualmente.${NC}"
+        echo -e "${YELLOW}   Usa: bash load-testing/stress-test.sh memory 5000${NC}"
+        echo ""
+    fi
+
     for i in $(seq 1 "$iterations"); do
         RESPONSE=$(curl -s -w " | HTTP:%{http_code}" "${ORDER_API_URL}/orders/stress")
-        echo -e "  [${i}/${iterations}] ${RESPONSE}"
-        sleep 0.5
+        # Mostrar progreso cada 100 llamadas para no saturar la terminal
+        if (( i % 100 == 0 )) || (( i <= 10 )); then
+            MEM_KB=$(echo "$RESPONSE" | grep -o '"memory_used_kb": [0-9.]*' | grep -o '[0-9.]*' 2>/dev/null || echo "?")
+            echo -e "  [${i}/${iterations}] Memoria acumulada: ~${MEM_KB} KB"
+        fi
+        sleep 0.1   # Reducido de 0.5s a 0.1s — más rápido
     done
 
+    TOTAL_KB=$(( iterations ))
     echo ""
-    echo -e "${GREEN}✅ Memory leak simulado. Verifica el panel en Grafana.${NC}"
+    echo -e "${GREEN}✅ Memory leak simulado: ~${TOTAL_KB}KB acumulados. Verifica en Grafana.${NC}"
     echo -e "${CYAN}Para limpiar: curl -X POST ${ORDER_API_URL}/orders/reset-stress${NC}"
 }
 
@@ -83,42 +99,50 @@ run_load_storm() {
     read -p "Presiona ENTER para iniciar la tormenta... " -r
 
     echo -e "${RED}🌊 ¡INICIANDO TORMENTA DE REQUESTS!${NC}"
+    echo -e "${YELLOW}  (Las oleadas son continuas, sin pausa — esto sí dispara la CPU)${NC}"
+    echo ""
 
-    # Ejecutamos requests en paralelo usando background jobs
-    SUCCESS=0
-    FAILED=0
+    local WAVE_SIZE=50   # 50 requests simultáneos en cada oleada — satura la CPU
+    local sent=0
 
-    for i in $(seq 1 "$iterations"); do
-        # Request en background para paralelismo
-        (
-            PRODUCT=${PRODUCTS[$((RANDOM % ${#PRODUCTS[@]}))]}
-            QUANTITY=$((RANDOM % 3 + 1))
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                -X POST \
-                -H "Content-Type: application/json" \
-                -d "{\"product_id\": \"${PRODUCT}\", \"quantity\": ${QUANTITY}}" \
-                "${ORDER_API_URL}/orders" \
-                --max-time 5)
-
-            if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "409" ]; then
-                echo -ne "${GREEN}.${NC}"
-            else
-                echo -ne "${RED}x${NC}"
-            fi
-        ) &
-
-        # Cada 20 requests, esperamos un poco para no saturar el sistema de demo
-        if (( i % 20 == 0 )); then
-            wait
-            echo " [$i/$iterations]"
-            sleep 0.2
+    while (( sent < iterations )); do
+        # Calcular cuántos lanzar en esta oleada
+        local this_wave=$WAVE_SIZE
+        if (( sent + this_wave > iterations )); then
+            this_wave=$(( iterations - sent ))
         fi
+
+        # Lanzar oleada de requests todos en background (sin wait entre ellos)
+        for j in $(seq 1 "$this_wave"); do
+            (
+                PRODUCT=${PRODUCTS[$((RANDOM % ${#PRODUCTS[@]}))]}
+                QUANTITY=$((RANDOM % 3 + 1))
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -X POST \
+                    -H "Content-Type: application/json" \
+                    -d "{\"product_id\": \"${PRODUCT}\", \"quantity\": ${QUANTITY}}" \
+                    "${ORDER_API_URL}/orders" \
+                    --max-time 5)
+
+                if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "409" ]; then
+                    echo -ne "${GREEN}.${NC}"
+                else
+                    echo -ne "${RED}x${NC}"
+                fi
+            ) &
+        done
+
+        sent=$(( sent + this_wave ))
+        # Espera que termine esta oleada antes de disparar la siguiente
+        wait
+        echo " [$sent/$iterations] — $(date +%H:%M:%S)"
+        # Sin sleep: oleadas continuas para mantener presión de CPU sostenida
     done
 
-    wait
     echo ""
     echo ""
     echo -e "${GREEN}✅ Tormenta completada. Observa cómo el HPA reduce los pods en ~5 minutos.${NC}"
+    echo -e "${CYAN}   kubectl get hpa -n taller-monitoreo --watch${NC}"
 }
 
 # ── Función: Crear Órdenes Reales ─────────────────────────────────────────────
@@ -161,17 +185,30 @@ run_stock_drain() {
     echo "   Alerta 'LowInventoryStock' → 'ZeroInventoryStock' disparará"
     echo ""
 
-    read -p "Presiona ENTER para iniciar... " -r
+    # PASO 0: Reponer stock primero para garantizar que la demo funcione siempre
+    echo -e "${CYAN}[SETUP] Reponiendo stock de headset-01 a 15 unidades para la demo...${NC}"
+    RESTOCK=$(curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"quantity": 15}' \
+        "${INVENTORY_URL}/inventory/headset-01/restock" 2>/dev/null || echo '{}')
+    NEW_STOCK=$(echo "$RESTOCK" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('new_stock','?'))" 2>/dev/null || echo "?")
+    echo -e "${GREEN}  ✅ Stock de headset-01 → ${NEW_STOCK} unidades${NC}"
+    echo ""
 
-    # headset-01 tiene solo 10 unidades — lo agotamos rápido
-    for i in $(seq 1 12); do
+    read -p "Presiona ENTER para iniciar el drenado... " -r
+
+    # Agotar las 15 unidades de a 1 — veremos la barra bajar en Grafana
+    for i in $(seq 1 18); do
         RESPONSE=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -d '{"product_id": "headset-01", "quantity": 1}' \
             "${ORDER_API_URL}/orders")
 
         STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('order',{}).get('status', d.get('error','?')))" 2>/dev/null || echo "?")
-        echo -e "  Intento ${i}: ${STATUS}"
+        STOCK=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('order',{}).get('remaining_stock',''))" 2>/dev/null || echo "")
+        STOCK_MSG=""
+        [ -n "$STOCK" ] && STOCK_MSG=" (stock restante: ${STOCK})"
+        echo -e "  Intento ${i}: ${STATUS}${STOCK_MSG}"
         sleep 1
     done
 
